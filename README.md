@@ -51,9 +51,6 @@ Adaptive-Noise-Cancellation-DSP/
 │   ├── spectrograms.png
 │   ├── mse_convergence.png
 │   └── snr_comparison.png
-|
-└── docs/
-    └── ECEN_463_Final_Project.pdf
 ```
 
 ---
