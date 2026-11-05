@@ -1,84 +1,49 @@
 # Adaptive Noise Cancellation Using LMS and NLMS
 
-Implementation and analysis of **Least Mean Squares (LMS)** and **Normalized Least Mean Squares (NLMS)** adaptive filters in MATLAB for noise cancellation.
+A MATLAB implementation and comparison of **Least Mean Squares (LMS)** and **Normalized Least Mean Squares (NLMS)** adaptive filters for noise cancellation.
 
-The goal of this project was to explore how adaptive FIR filters can identify and suppress correlated noise when the characteristics of the noise are not known beforehand.
+I built this project to explore a problem that fixed-coefficient filters do not directly address: removing noise when its characteristics are not completely known ahead of time.
 
----
+The system uses a second measurement correlated with the unwanted noise. A 32-tap adaptive FIR filter continuously adjusts its coefficients to estimate that noise, subtract it from the corrupted signal, and recover the desired signal. I implemented both LMS and NLMS, then compared their behavior using time-domain output, mean squared error, signal-to-noise ratio, and spectrograms.
 
-## Project Objective
-
-Traditional FIR filters use fixed coefficients selected ahead of time.
-
-For this project, I wanted to investigate a different problem:
-
-> **Can a filter continuously adjust its own coefficients based on measured error and learn how to remove an unwanted signal?**
-
-I implemented and compared two adaptive-filtering algorithms:
-
-- **LMS - Least Mean Squares**
-- **NLMS - Normalized Least Mean Squares**
-
-The algorithms were evaluated by comparing:
-
-- Time-domain output
-- Mean Squared Error (MSE) convergence
-- Signal-to-Noise Ratio (SNR)
-- Frequency-domain behavior using spectrograms
+The complete MATLAB implementation is available in [`src/adaptive_noise_cancellation.m`](src/adaptive_noise_cancellation.m).
 
 ---
 
-## System Architecture
+## Adaptive Noise-Cancellation Architecture
 
-The adaptive noise-cancellation system uses two inputs:
+The experiment uses two inputs:
 
-1. A **primary input** containing the desired signal plus noise
-2. A **reference input** correlated with the unwanted noise
+- A **primary input** containing the desired signal plus noise
+- A **reference input** correlated with the unwanted noise
+
+The adaptive filter processes the reference signal and produces an estimate of the noise in the primary input. Subtracting that estimate produces the error signal, which serves as both the recovered output and the feedback used to update the filter coefficients.
 
 ```text
-Desired Signal
-      |
-      +----------------+
-                       |
-                       v
-                  +---------+
-Noise ----------> | Primary |
-                  |  Input  |
-                  +---------+
-                       |
-                       +------------------+
-                                          |
-Reference Noise                            v
-      |                           +----------------+
-      +-------------------------->| Adaptive FIR   |
-                                  | LMS / NLMS     |
-                                  +----------------+
-                                          |
-                                     Noise Estimate
+        Desired Signal
+              |
+              v
+          +-------+
+Noise -->|   +   |-----> Primary Input ------------------+
+          +-------+                                       |
+                                                          v
+Reference Noise ---> Adaptive FIR Filter ---> Noise Estimate
+                          LMS / NLMS                       |
+                               ^                          (-)
+                               |                           |
+                               +------ Error Signal <------+
                                           |
                                           v
-Primary Signal ----------------------->  (-)
-                                          |
-                                          v
-                                     Error Signal
-                                          |
-                                          v
-                                  Recovered Signal
+                                   Recovered Signal
 ```
 
-The adaptive filter attempts to model the noise contained in the primary signal.
-
-The estimated noise is then subtracted from the primary input, producing an error signal that ideally approaches the original desired signal.
+The system works when the reference measurement is correlated with the unwanted noise but not with the desired signal. As the filter adapts, its output approaches an estimate of the noise rather than the desired waveform.
 
 ---
 
-## Desired Signal
+## Controlled Experiment
 
-The original experiment uses a controlled synthetic signal containing three sinusoidal components:
-
-- **300 Hz**
-- **600 Hz**
-- **900 Hz**
+I used a known synthetic signal so the filtered outputs could be compared directly against the desired result. The signal contains three sinusoidal components at **300 Hz, 600 Hz, and 900 Hz**, sampled at **8 kHz** for **5 seconds**.
 
 ```matlab
 f1 = 300;
@@ -90,452 +55,194 @@ d = sin(2*pi*f1*t) ...
   + 0.3*sin(2*pi*f3*t);
 ```
 
-A controlled signal made it possible to directly compare the adaptive-filter outputs against a known reference.
-
-The signal was sampled at:
-
-```text
-Fs = 8000 Hz
-```
-
-for a duration of:
-
-```text
-T = 5 seconds
-```
-
----
-
-## Noise Model
-
-The experiment uses a filtered random-noise source to approximate broadband environmental noise.
+Filtered random noise is added to the desired signal to form the primary input. A separately filtered version of that noise provides the correlated reference measurement used by the adaptive filters.
 
 ```matlab
 noise = filter([1 -0.5 0.25], 1, 0.4*randn(size(t)));
-```
 
-The noisy primary input is then formed as:
-
-```matlab
 x_primary = d + noise;
-```
-
-A correlated reference-noise signal is separately generated for the adaptive filter:
-
-```matlab
 noise_ref = filter([1 0.5], 1, noise);
 ```
 
-This represents the basic adaptive-noise-cancellation problem: the system has access to the corrupted signal and to a separate measurement correlated with the unwanted noise.
+Both algorithms use the same 32-tap FIR structure so the comparison focuses on the coefficient-update method.
+
+| Parameter | Value |
+| --- | ---: |
+| Sample rate | 8 kHz |
+| Signal duration | 5 seconds |
+| Desired frequencies | 300, 600, and 900 Hz |
+| Adaptive-filter length | 32 taps |
+| LMS step size | 0.01 |
+| NLMS step size | 0.5 |
 
 ---
 
-## Adaptive FIR Filter
+## LMS and NLMS Implementation
 
-Both algorithms use a **32-tap adaptive FIR filter**.
-
-```matlab
-M = 32;
-```
-
-For each new sample, a vector containing the most recent reference-noise samples is constructed:
+For each sample, the filter forms a vector from the most recent reference-noise values and calculates a noise estimate:
 
 ```matlab
 x_vec = noise_ref(n:-1:n-M+1)';
+
+y(n) = w' * x_vec;
+e(n) = x_primary(n) - y(n);
 ```
 
-The adaptive filter then produces an estimate of the noise:
+Here, `y(n)` is the estimated noise and `e(n)` is the recovered output.
 
-```text
-Reference Noise
-      |
-      v
-x[n], x[n-1], ... x[n-31]
-      |
-      v
-Adaptive FIR Coefficients
-      |
-      v
-Estimated Noise
-```
+### LMS
 
-The coefficients are continuously updated based on the error between the primary signal and the filter output.
-
----
-
-# LMS Algorithm
-
-For LMS, the filter output is calculated using:
-
-```matlab
-y_LMS(n) = w_LMS' * x_vec;
-```
-
-The error signal is:
-
-```matlab
-e_LMS(n) = x_primary(n) - y_LMS(n);
-```
-
-The filter coefficients are then updated using:
+LMS updates the coefficient vector using the current input, error, and a fixed step size:
 
 ```matlab
 w_LMS = w_LMS + mu_LMS * x_vec * e_LMS(n);
 ```
 
-where the LMS step size was:
+The step size controls how aggressively the filter adapts. A larger value can respond more quickly, but it can also increase coefficient variation or make the filter unstable.
 
-```matlab
-mu_LMS = 0.01;
-```
+### NLMS
 
-The step size determines how aggressively the adaptive filter changes its coefficients.
-
-A larger value can increase convergence speed but may also increase instability or steady-state error.
-
----
-
-# NLMS Algorithm
-
-NLMS extends LMS by normalizing the coefficient update according to the energy of the input vector.
-
-The input normalization term is calculated as:
+NLMS uses the same basic approach but normalizes its update by the energy of the current input vector:
 
 ```matlab
 norm_factor = x_vec' * x_vec + eps_val;
-```
 
-and the coefficients are updated using:
-
-```matlab
 w_NLMS = w_NLMS ...
        + (mu_NLMS / norm_factor) * x_vec * e_NLMS(n);
 ```
 
-with:
-
-```matlab
-mu_NLMS = 0.5;
-```
-
-Normalization reduces the sensitivity of the adaptation rate to changes in reference-signal magnitude.
-
----
-
-## Performance Metrics
-
-I evaluated the two algorithms using several different metrics rather than relying on visual inspection alone.
-
-### Mean Squared Error
-
-The instantaneous squared error is tracked using:
-
-```matlab
-mse_LMS(n)  = e_LMS(n)^2;
-mse_NLMS(n) = e_NLMS(n)^2;
-```
-
-The resulting MSE is smoothed and plotted in decibels to evaluate convergence behavior.
-
-This helps visualize both:
-
-- How quickly the adaptive filter learns
-- How much residual error remains after convergence
-
----
-
-## Signal-to-Noise Ratio
-
-SNR was calculated before and after adaptive filtering.
-
-```matlab
-snr_before = 10*log10(var(d) ...
-           / (var(x_primary-d) + eps_val));
-
-snr_LMS = 10*log10(var(d) ...
-        / (var(e_LMS-d) + eps_val));
-
-snr_NLMS = 10*log10(var(d) ...
-         / (var(e_NLMS-d) + eps_val));
-```
-
-This gives a quantitative comparison between:
-
-```text
-Original Noisy Signal
-        vs.
-LMS Filter Output
-        vs.
-NLMS Filter Output
-```
-
----
-
-## Spectral Analysis
-
-In addition to time-domain analysis, I generated spectrograms of:
-
-- Noisy input
-- LMS output
-- NLMS output
-
-The spectrogram calculation uses:
-
-```text
-Segment Length = 128 samples
-Overlap        = 96 samples
-FFT Size       = 512
-```
-
-The spectra are converted to logarithmic power:
-
-```matlab
-S1dB = 10*log10(abs(S1).^2 + eps);
-```
-
-Using identical color limits across the three spectrograms makes the frequency-domain effects of the adaptive filters easier to compare directly.
+This makes the effective adaptation rate less dependent on the magnitude of the reference signal. It does not, however, guarantee that NLMS will outperform LMS for every step size, filter length, or noise realization.
 
 ---
 
 ## Results
 
-The experiment showed that both LMS and NLMS were capable of adapting to the correlated reference-noise signal and improving the recovered output.
+I evaluated the algorithms from several perspectives rather than relying on a single plot. The time-domain output shows waveform recovery, the MSE plot shows adaptation behavior, SNR provides a numerical comparison, and the spectrograms show what happened to the desired frequency components and surrounding noise energy.
 
-One of the more interesting results was that **LMS produced better performance than NLMS under the selected experimental parameters**.
+### Time-Domain Recovery
 
-This was useful because it demonstrated that a theoretically more sophisticated algorithm does not automatically produce a better result.
+![Time-domain comparison of the noisy input, desired signal, LMS output, and NLMS output](Results/time_domain.png)
 
-Performance depends on factors such as:
+*Time-domain comparison of the noisy input and the outputs recovered by LMS and NLMS.*
 
-- Step-size selection
-- Filter length
-- Input-signal statistics
-- Reference-noise correlation
-- Convergence requirements
-- Steady-state error
+Both adaptive filters reduce the visible noise component and follow the structure of the desired signal more closely than the unfiltered input. Neither output perfectly reconstructs the original waveform, but the comparison shows that both algorithms are learning from the correlated reference signal rather than acting like fixed filters.
 
-Rather than assuming NLMS should always outperform LMS, the experiment reinforced the importance of evaluating algorithms using measured results.
+The time-domain plot is useful for checking waveform behavior, but it does not fully describe convergence or residual noise. That required looking at the other measurements.
 
----
+### MSE Convergence
 
-## Debugging and Analysis
+![Smoothed MSE convergence for LMS and NLMS](Results/mse_convergence.png)
 
-A major part of this project was learning how to evaluate signal-processing algorithms beyond simply determining whether the MATLAB code executed successfully.
+*Smoothed squared-error behavior for the LMS and NLMS adaptive filters.*
 
-The analysis required asking:
+Both algorithms remain adaptive throughout the experiment. Under the selected parameters, LMS settles to a lower error level, while NLMS shows larger steady-state fluctuations.
 
-```text
-Did the algorithm converge?
+This does not mean LMS is universally better than NLMS. In this experiment, the LMS and NLMS step sizes were different, and the normalized update used by NLMS was more aggressive. The result demonstrates that algorithm selection cannot be separated from parameter selection.
 
-How quickly did it converge?
+### Signal-to-Noise Ratio
 
-How much residual noise remains?
+![SNR comparison before filtering and after LMS and NLMS processing](Results/snr_bar.png)
 
-Did SNR actually improve?
+*Signal-to-noise ratio for the original noisy signal and the recovered LMS and NLMS outputs.*
 
-What happened to the desired frequency components?
+The SNR comparison supports the same conclusion as the MSE plot. LMS produced the largest improvement for this test case, while NLMS provided a smaller improvement under the selected settings.
 
-How sensitive is performance to the learning rate?
-```
+I intentionally treat this as an **experiment-specific result**, not a general ranking of the two algorithms. NLMS can be advantageous when input power varies because its update is normalized, but its performance still depends on the normalized step size, input statistics, filter length, and reference-noise correlation.
 
-Using multiple views of the same system helped answer those questions:
+### Spectral Behavior
 
-```text
-Time Domain
-     +
-MSE Convergence
-     +
-SNR
-     +
-Spectrogram
-     =
-More Complete Performance Evaluation
-```
+![Spectrogram comparison of the noisy input, LMS output, and NLMS output](Results/spectrograms.png)
 
-This reinforced an engineering principle that I have also applied to hardware development:
+*Spectrograms of the noisy input and the outputs produced by LMS and NLMS.*
 
-> **A system should be validated with measurements that directly test the behavior it was designed to achieve.**
+The spectrograms show that both filters preserve the desired components near **300 Hz, 600 Hz, and 900 Hz** while reducing broadband background energy.
+
+The spectral differences between LMS and NLMS are smaller than the differences shown by the MSE and SNR comparisons. NLMS produces a slightly lower noise floor in some regions, while LMS provides the stronger overall steady-state MSE and SNR result for the selected parameters.
+
+That distinction was one reason it was useful to evaluate the algorithms with several metrics. A single time-domain trace or spectrogram would not have told the complete story.
 
 ---
 
-## Source Code
+## Engineering Takeaways
 
-The MATLAB implementation can be found in:
+The most important lesson from this project was that successfully implementing an algorithm is not the same as proving that it works well.
 
-```text
-src/adaptive_noise_cancellation.m
-```
+The MATLAB code ran both adaptive filters, but evaluating them required asking more specific questions:
 
-The code contains:
+- Did the filters actually reduce the unwanted signal?
+- Did they preserve the desired frequency components?
+- How stable was the adaptation?
+- How much residual error remained?
+- Did the measured SNR improve?
+- How sensitive were the results to the selected step sizes?
 
-- Controlled signal generation
-- Correlated noise generation
-- 32-tap adaptive FIR filtering
-- LMS implementation
-- NLMS implementation
-- Coefficient adaptation
-- MSE tracking
-- SNR calculation
-- Time-domain visualization
-- Spectrogram analysis
-- Convergence analysis
+No single plot answered all of those questions. The time-domain view showed waveform recovery, MSE exposed steady-state behavior, SNR provided a direct performance comparison, and the spectrograms showed whether the desired spectral content survived the filtering process.
+
+The comparison also reinforced that a more sophisticated algorithm does not automatically produce a better result. NLMS adds useful normalization, but its performance still depends on how the experiment is configured. For this run, the selected LMS parameters produced the better overall result.
+
+If I expanded the comparison, I would make it more repeatable by controlling the random-noise realization and running automated step-size sweeps across multiple trials. That would separate the underlying algorithm behavior from the outcome of one noise realization and one selected parameter set.
 
 ---
 
-## What I Learned
+## Future Work: RF and SDR Signal Processing
 
-This project provided practical experience with:
-
-- **Digital Signal Processing**
-- **MATLAB**
-- **Adaptive filtering**
-- **FIR filters**
-- **LMS**
-- **NLMS**
-- **Coefficient adaptation**
-- **Sampling**
-- **Time-domain analysis**
-- **Frequency-domain analysis**
-- **FFT-based spectral analysis**
-- **Spectrograms**
-- **SNR**
-- **Mean Squared Error**
-- **Algorithm comparison**
-- **Quantitative engineering validation**
-
-Most importantly, the project strengthened my understanding that implementing an algorithm is only part of the engineering problem.
-
-The other part is developing experiments and measurements that demonstrate **how well the implementation actually performs**.
-
----
-
-# Future Work
-
-The original project intentionally uses a controlled synthetic signal so that filter performance can be compared against a known desired signal.
-
-A future revision would extend the project toward more realistic signals and deeper algorithm characterization.
-
-## Real Audio
-
-Replace the synthetic signal with:
-
-- Recorded speech
-- WAV files
-- Recorded environmental noise
-
-This would provide a more realistic adaptive-noise-cancellation problem.
-
-## Parameter Sweeps
-
-Automatically test multiple LMS and NLMS learning rates and compare:
-
-- Convergence speed
-- Steady-state MSE
-- SNR improvement
-- Stability
-
-## Filter-Length Analysis
-
-Compare:
-
-```text
-16 taps
-32 taps
-64 taps
-128 taps
-```
-
-to analyze the tradeoff between computational complexity and filtering performance.
-
-## Automated Metrics
-
-Add automatic calculation of:
-
-- Convergence time
-- Residual noise power
-- Average steady-state MSE
-- SNR improvement
-- Algorithm computational cost
-
-## FPGA Implementation
-
-A long-term extension would be to move portions of the adaptive-filter architecture from MATLAB into an FPGA implementation.
-
-```text
-Sample Stream
-     |
-     v
-Adaptive FIR Filter
-     |
-     v
-Error Calculation
-     |
-     v
-Coefficient Update
-     |
-     v
-Filtered Output
-```
-
-This would connect the DSP concepts explored in this project with my previous **VHDL and FPGA development experience**.
-
-## RF / SDR Extension
-
-Another future direction is to apply similar signal-processing techniques to sampled RF data from a software-defined radio.
+The direction I am most interested in pursuing next is applying the same adaptive-filtering and measurement techniques to sampled RF data from a software-defined radio.
 
 ```text
 Antenna
    |
    v
-SDR
+Software-Defined Radio
    |
    v
-Sampled Signal
+Sampled I/Q Data
    |
-   v
-DSP / Filtering
-   |
-   v
-Spectrum / Detection / Demodulation
+   +----------------------+
+   |                      |
+   v                      v
+Primary Channel     Reference Channel
+   |                      |
+   +----------+-----------+
+              |
+              v
+      Adaptive Filtering
+              |
+              v
+  Interference-Reduced Output
+              |
+              v
+   Spectrum / Detection /
+       Demodulation
 ```
 
-This would extend the concepts explored here into practical **RF signal processing and embedded DSP**.
+A practical extension would replace the synthetic waveform with recorded complex I/Q samples and investigate whether an available reference channel could be used to estimate and suppress correlated interference.
+
+That would introduce new questions that are not present in this controlled experiment: how to obtain a useful reference measurement, how signal bandwidth affects the required filter length, how the adaptation behaves with changing RF conditions, and whether the desired signal is distorted during cancellation.
+
+The same validation approach would still apply. I would compare time-domain or I/Q behavior, convergence, output SNR, and spectral content rather than relying only on whether the algorithm produced an output.
+
+If the processing eventually needed to operate continuously on a high-rate sample stream, an FPGA implementation could become a useful later step. My first priority, however, would be building and validating the RF/SDR signal-processing experiment before moving the adaptive FIR and coefficient-update path into hardware.
 
 ---
 
 ## Repository Structure
 
 ```text
-Adaptive-Noise-Cancellation-DSP/
-|
+.
 ├── README.md
-|
 ├── src/
 │   └── adaptive_noise_cancellation.m
-|
-├── results/
-│   ├── time_domain.png
-│   ├── spectrograms.png
-│   ├── mse_convergence.png
-│   └── snr_comparison.png
-|
-└── docs/
-    └── ECEN_463_Final_Project.pdf
+└── Results/
+    ├── time_domain.png
+    ├── mse_convergence.png
+    ├── snr_bar.png
+    └── spectrograms.png
 ```
-
----
-
-## Tools
-
-- **MATLAB**
-- Signal Processing Toolbox
-- Adaptive FIR Filtering
-- Spectrogram / FFT Analysis
 
 ---
 
 ## Background
 
-This project was originally developed for **ECEN 463: Digital Signal Processing** at the University of Nebraska-Lincoln.
+This project was originally developed for **ECEN 463: Digital Signal Processing** at the University of Nebraska–Lincoln.
 
-The original coursework established the LMS/NLMS implementation and experimental framework. Future revisions will extend the project toward real-world audio, automated parameter characterization, FPGA acceleration, and RF/SDR signal processing.
+It gave me practical experience implementing adaptive filters, but the more valuable part was learning how to design an experiment that measures whether a DSP algorithm actually achieves its intended result. That measurement-driven approach is what I want to continue applying to embedded DSP, FPGA, and RF systems.
